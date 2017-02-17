@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path"
+	"time"
 
 	"github.com/miekg/coredns/core/dnsserver"
 	"github.com/miekg/coredns/middleware"
@@ -167,3 +168,7 @@ func TransferParse(c *caddy.Controller, secondary bool) (tos, froms []string, er
 	}
 	return
 }
+
+// epochAsSerial returns the time.Time as a uint32 in Unix epoch
+// in the UTC timezone.
+func epochAsSerial(t time.Time) uint32 { return uint32(t.Unix()) }
