@@ -2,6 +2,7 @@ package file
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"path"
 	"time"
@@ -54,6 +55,7 @@ func fileParse(c *caddy.Controller) (Zones, error) {
 	origins := []string{}
 
 	config := dnsserver.GetConfig(c)
+	ignoreSerial := false
 
 	for c.Next() {
 		if c.Val() == "file" {
@@ -93,14 +95,25 @@ func fileParse(c *caddy.Controller) (Zones, error) {
 
 			noReload := false
 			prxy := proxy.Proxy{}
+			t := []string{}
+			var e error
+
 			for c.NextBlock() {
-				t, _, e := TransferParse(c, false)
-				if e != nil {
-					return Zones{}, e
-				}
 				switch c.Val() {
+				case "transfer":
+					c.Next() // discard 'transfer'
+					if t, _, e = TransferParse(c, false); e != nil {
+						return Zones{}, e
+					}
+
 				case "no_reload":
 					noReload = true
+
+				case "never_forget_to_update_that_damn_serial_again":
+					fallthrough
+
+				case "ignore_serial":
+					ignoreSerial = true
 
 				case "upstream":
 					args := c.RemainingArgs()
@@ -124,45 +137,50 @@ func fileParse(c *caddy.Controller) (Zones, error) {
 			}
 		}
 	}
+
+	for _, origin := range origins {
+		soa := z[origin].Apex.SOA
+		sigs := len(z[origin].Apex.SIGSOA) > 0
+		if sigs && ignoreSerial {
+			// Error or log? Log for now.
+			log.Printf("[WARNING] Ignoring serial for %q ignored because SOA has signatures", origin)
+			continue
+		}
+		soa.Serial = epochAsSerial(time.Now())
+	}
+
 	return Zones{Z: z, Names: names}, nil
 }
 
 // TransferParse parses transfer statements: 'transfer to [address...]'.
 func TransferParse(c *caddy.Controller, secondary bool) (tos, froms []string, err error) {
-	what := c.Val()
-	if !c.NextArg() {
-		return nil, nil, c.ArgErr()
-	}
-	value := c.Val()
-	switch what {
-	case "transfer":
-		if value == "to" {
-			tos = c.RemainingArgs()
-			for i := range tos {
-				if tos[i] != "*" {
-					normalized, err := dnsutil.ParseHostPort(tos[i], "53")
-					if err != nil {
-						return nil, nil, err
-					}
-					tos[i] = normalized
+	switch c.Val() {
+	case "to":
+		tos = c.RemainingArgs()
+		for i := range tos {
+			if tos[i] != "*" {
+				normalized, err := dnsutil.ParseHostPort(tos[i], "53")
+				if err != nil {
+					return nil, nil, err
 				}
+				tos[i] = normalized
 			}
 		}
-		if value == "from" {
-			if !secondary {
-				return nil, nil, fmt.Errorf("can't use `transfer from` when not being a secondary")
-			}
-			froms = c.RemainingArgs()
-			for i := range froms {
-				if froms[i] != "*" {
-					normalized, err := dnsutil.ParseHostPort(froms[i], "53")
-					if err != nil {
-						return nil, nil, err
-					}
-					froms[i] = normalized
-				} else {
-					return nil, nil, fmt.Errorf("can't use '*' in transfer from")
+
+	case "from":
+		if !secondary {
+			return nil, nil, fmt.Errorf("can't use `transfer from` when not being a secondary")
+		}
+		froms = c.RemainingArgs()
+		for i := range froms {
+			if froms[i] != "*" {
+				normalized, err := dnsutil.ParseHostPort(froms[i], "53")
+				if err != nil {
+					return nil, nil, err
 				}
+				froms[i] = normalized
+			} else {
+				return nil, nil, fmt.Errorf("can't use '*' in transfer from")
 			}
 		}
 	}
