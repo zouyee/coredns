@@ -12,8 +12,8 @@ import (
 
 	"github.com/coredns/coredns/plugin"
 	"github.com/coredns/coredns/plugin/debug"
-	"github.com/coredns/coredns/plugin/pkg/policy"
 	clog "github.com/coredns/coredns/plugin/pkg/log"
+	"github.com/coredns/coredns/plugin/pkg/policy"
 	"github.com/coredns/coredns/request"
 
 	"github.com/miekg/dns"
@@ -64,7 +64,7 @@ func (f *Forward) Name() string { return "forward" }
 func (f *Forward) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns.Msg) (int, error) {
 
 	state := request.Request{W: w, Req: r}
-	if !f.match(state) {
+	if !plugin.Match(state, f.from, f.ignored...) {
 		return plugin.NextOrFailure(f.Name(), f.Next, ctx, w, r)
 	}
 
@@ -159,27 +159,6 @@ func (f *Forward) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns.Msg
 	}
 
 	return dns.RcodeServerFailure, ErrNoHealthy
-}
-
-func (f *Forward) match(state request.Request) bool {
-	if !plugin.Name(f.from).Matches(state.Name()) || !f.isAllowedDomain(state.Name()) {
-		return false
-	}
-
-	return true
-}
-
-func (f *Forward) isAllowedDomain(name string) bool {
-	if dns.Name(name) == dns.Name(f.from) {
-		return true
-	}
-
-	for _, ignore := range f.ignored {
-		if plugin.Name(ignore).Matches(name) {
-			return false
-		}
-	}
-	return true
 }
 
 // ForceTCP returns if TCP is forced to be used even when the request comes in over UDP.

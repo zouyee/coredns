@@ -32,7 +32,7 @@ type GRPC struct {
 // ServeDNS implements the plugin.Handler interface.
 func (g *GRPC) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns.Msg) (int, error) {
 	state := request.Request{W: w, Req: r}
-	if !g.match(state) {
+	if !plugin.Match(state, g.from, g.ignored...) {
 		return plugin.NextOrFailure(g.Name(), g.Next, ctx, w, r)
 	}
 
@@ -104,27 +104,6 @@ func (g *GRPC) Name() string { return "grpc" }
 
 // Len returns the number of configured proxies.
 func (g *GRPC) len() int { return len(g.proxies) }
-
-func (g *GRPC) match(state request.Request) bool {
-	if !plugin.Name(g.from).Matches(state.Name()) || !g.isAllowedDomain(state.Name()) {
-		return false
-	}
-
-	return true
-}
-
-func (g *GRPC) isAllowedDomain(name string) bool {
-	if dns.Name(name) == dns.Name(g.from) {
-		return true
-	}
-
-	for _, ignore := range g.ignored {
-		if plugin.Name(ignore).Matches(name) {
-			return false
-		}
-	}
-	return true
-}
 
 // List returns a set of proxies to be used for this client depending on the policy in p.
 func (g *GRPC) list() []*Proxy {

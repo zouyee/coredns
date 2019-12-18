@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/coredns/coredns/plugin/pkg/parse"
+	"github.com/coredns/coredns/request"
 	"github.com/miekg/dns"
 )
 
@@ -49,6 +50,29 @@ func (n Name) Matches(child string) bool {
 		return true
 	}
 	return dns.IsSubDomain(string(n), child)
+}
+
+// Match checks to see if other is a subdomain (or the same domain) of n
+// or could be ignored in a exclude set.
+func Match(state request.Request, from string, ignores ...string) bool {
+	if !Name(from).Matches(state.Name()) || !isAllowedDomain(state.Name(), from, ignores...) {
+		return false
+	}
+
+	return true
+}
+
+func isAllowedDomain(name, from string, ignored ...string) bool {
+	if dns.Name(name) == dns.Name(from) {
+		return true
+	}
+
+	for _, ignore := range ignored {
+		if Name(ignore).Matches(name) {
+			return false
+		}
+	}
+	return true
 }
 
 // Normalize lowercases and makes n fully qualified.
