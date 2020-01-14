@@ -319,12 +319,11 @@ func (dns *dnsControl) HasSynced() bool {
 	// If that's the case wait and resend watch request.
 	v, err := dns.client.Discovery().ServerVersion()
 	if err != nil {
-		log.Warningf("While trying to communicate with apiserver found err: %v", err)
+		log.Warningf("While trying to communicate with apiserver found error: %v", err)
 		return false
 	}
 	log.Infof("Running with Kubernetes cluster version: v%s.%s. git version: %s. git tree state: %s. commit: %s. platform: %s",
 		v.Major, v.Minor, v.GitVersion, v.GitTreeState, v.GitCommit, v.Platform)
-	log.Infof("Communication with server successful")
 	a := dns.svcController.HasSynced()
 	b := true
 	if dns.epController != nil {
