@@ -10,10 +10,11 @@ import (
 	"time"
 
 	"github.com/coredns/coredns/plugin/metrics"
-	"github.com/coredns/coredns/plugin/metrics/vars"
 	"github.com/coredns/coredns/plugin/test"
 
+	"github.com/google/go-cmp/cmp"
 	"github.com/miekg/dns"
+	"github.com/prometheus/common/model"
 )
 
 // Start test server that has metrics enabled. Then tear it down again.
@@ -29,13 +30,61 @@ example.com:0 {
 }
 `
 	srv, err := CoreDNSServer(corefile)
+	defer srv.Stop()
 	if err != nil {
 		t.Fatalf("Could not get CoreDNS serving instance: %s", err)
 	}
-	defer srv.Stop()
 }
 
+func TestMetricsAutoPluginEnabled(t *testing.T) {
+	corefile := `example.org:0 {
+	chaos CoreDNS-001 miek@miek.nl
+	prometheus localhost:0
+}
+
+example.com:0 {
+	forward . 8.8.4.4:53
+	prometheus localhost:0
+}
+`
+	srv, err := CoreDNSServer(corefile)
+	defer srv.Stop()
+	if err != nil {
+		t.Fatalf("Could not get CoreDNS serving instance: %s", err)
+	}
+
+	metricName := "coredns_plugin_enabled" //{server, zone, name}
+	// cache Plugin sample
+	cachePluginSamples := func(plugin, zone string) map[model.LabelName]model.LabelValue {
+		return map[model.LabelName]model.LabelValue{
+			"name":                model.LabelValue(plugin),
+			model.MetricNameLabel: model.LabelValue(metricName),
+			"server":              "dns://:0",
+			"zone":                model.LabelValue(zone),
+			"Value":               "1",
+		}
+	}
+	expect := test.DnsMetrics(
+		map[string]model.Samples{
+			metricName: model.Samples{
+				test.NewCacheSample(model.LabelValue(metricName), cachePluginSamples("chaos", "example.org.")),
+				test.NewCacheSample(model.LabelValue(metricName), cachePluginSamples("forward", "example.com.")),
+				test.NewCacheSample(model.LabelValue(metricName), cachePluginSamples("prometheus", "example.com.")),
+				test.NewCacheSample(model.LabelValue(metricName), cachePluginSamples("prometheus", "example.org.")),
+			},
+		},
+	)
+	// we should have metrics from forward, cache, and metrics itself
+	actual, err := test.GetDnsMetrics(map[string]interface{}{
+		metricName: nil,
+	}, metrics.ListenAddr)
+	// compare to expected
+	if diff := cmp.Diff(expect, actual); diff != "" {
+		t.Errorf("Unexpected result diff (-want, +got): %s", diff)
+	}
+}
 func TestMetricsRefused(t *testing.T) {
+
 	metricName := "coredns_dns_response_rcode_count_total"
 
 	corefile := `example.org:0 {
@@ -43,11 +92,19 @@ func TestMetricsRefused(t *testing.T) {
 	prometheus localhost:0
 }
 `
-	srv, udp, _, err := CoreDNSServerAndPorts(corefile)
+	srv, err := CoreDNSServer(corefile)
+	defer srv.Stop()
 	if err != nil {
 		t.Fatalf("Could not get CoreDNS serving instance: %s", err)
 	}
-	defer srv.Stop()
+
+	udp, _ := CoreDNSServerPorts(srv, 0)
+	if udp == "" {
+		t.Fatalf("Could not get UDP listening port")
+	}
+        if err != nil {
+		t.Fatalf("Could not get CoreDNS serving instance: %s", err)
+	}
 
 	m := new(dns.Msg)
 	m.SetQuestion("google.com.", dns.TypeA)
@@ -56,85 +113,31 @@ func TestMetricsRefused(t *testing.T) {
 		t.Fatalf("Could not send message: %s", err)
 	}
 
-	data := test.Scrape("http://" + metrics.ListenAddr + "/metrics")
-	got, labels := test.MetricValue(metricName, data)
-
-	if got != "1" {
-		t.Errorf("Expected value %s for refused, but got %s", "1", got)
+	// coredns cache size
+	cachSizeSamples := map[model.LabelName]model.LabelValue{
+		model.MetricNameLabel: model.LabelValue(metricName),
+		"server":              "dns://:0",
+		"rcode":               "REFUSED",
+		"zone":                "dropped",
+		"Value":               "1",
 	}
-	if labels["zone"] != vars.Dropped {
-		t.Errorf("Expected zone value %s for refused, but got %s", vars.Dropped, labels["zone"])
+	expect := test.DnsMetrics(
+		map[string]model.Samples{
+			metricName: model.Samples{test.NewCacheSample(model.LabelValue(metricName), cachSizeSamples)},
+		},
+	)
+	actual, err := test.GetDnsMetrics(map[string]interface{}{
+		metricName: nil,
+	}, metrics.ListenAddr)
+	if err != nil {
+		t.Errorf("Could not get dns metrics: %v", err)
 	}
-	if labels["rcode"] != "REFUSED" {
-		t.Errorf("Expected zone value %s for refused, but got %s", "REFUSED", labels["rcode"])
+	t.Logf("current addr： %s\n", metrics.ListenAddr)
+	// compare to expected
+	if diff := cmp.Diff(expect, actual); diff != "" {
+		t.Errorf("Unexpected result diff (-want, +got): %s", diff)
 	}
 }
-
-func TestMetricsAuto(t *testing.T) {
-	tmpdir, err := ioutil.TempDir(os.TempDir(), "coredns")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	corefile := `org:0 {
-		auto {
-			directory ` + tmpdir + ` db\.(.*) {1}
-			reload 1s
-		}
-		prometheus localhost:0
-	}
-`
-
-	i, err := CoreDNSServer(corefile)
-	if err != nil {
-		t.Fatalf("Could not get CoreDNS serving instance: %s", err)
-	}
-
-	udp, _ := CoreDNSServerPorts(i, 0)
-	if udp == "" {
-		t.Fatalf("Could not get UDP listening port")
-	}
-	defer i.Stop()
-
-	// Write db.example.org to get example.org.
-	if err = ioutil.WriteFile(filepath.Join(tmpdir, "db.example.org"), []byte(zoneContent), 0644); err != nil {
-		t.Fatal(err)
-	}
-	// TODO(miek): make the auto sleep even less.
-	time.Sleep(1100 * time.Millisecond) // wait for it to be picked up
-
-	m := new(dns.Msg)
-	m.SetQuestion("www.example.org.", dns.TypeA)
-
-	if _, err := dns.Exchange(m, udp); err != nil {
-		t.Fatalf("Could not send message: %s", err)
-	}
-
-	metricName := "coredns_dns_request_count_total" //{zone, proto, family}
-
-	data := test.Scrape("http://" + metrics.ListenAddr + "/metrics")
-	// Get the value for the metrics where the one of the labels values matches "example.org."
-	got, _ := test.MetricValueLabel(metricName, "example.org.", data)
-
-	if got != "1" {
-		t.Errorf("Expected value %s for %s, but got %s", "1", metricName, got)
-	}
-
-	// Remove db.example.org again. And see if the metric stops increasing.
-	os.Remove(filepath.Join(tmpdir, "db.example.org"))
-	time.Sleep(1100 * time.Millisecond) // wait for it to be picked up
-	if _, err := dns.Exchange(m, udp); err != nil {
-		t.Fatalf("Could not send message: %s", err)
-	}
-
-	data = test.Scrape("http://" + metrics.ListenAddr + "/metrics")
-	got, _ = test.MetricValueLabel(metricName, "example.org.", data)
-
-	if got != "1" {
-		t.Errorf("Expected value %s for %s, but got %s", "1", metricName, got)
-	}
-}
-
 // Show that when 2 blocs share the same metric listener (they have a prometheus plugin on the same listening address),
 // ALL the metrics of the second bloc in order are declared in prometheus, especially the plugins that are used ONLY in the second bloc
 func TestMetricsSeveralBlocs(t *testing.T) {
@@ -158,10 +161,10 @@ google.com:0 {
 `, addrMetrics, addrMetrics)
 
 	i, udp, _, err := CoreDNSServerAndPorts(corefile)
+	defer i.Stop()
 	if err != nil {
 		t.Fatalf("Could not get CoreDNS serving instance: %s", err)
 	}
-	defer i.Stop()
 
 	// send an initial query to setup properly the cache size
 	m := new(dns.Msg)
@@ -189,47 +192,13 @@ google.com:0 {
 	}
 }
 
-func TestMetricsPluginEnabled(t *testing.T) {
-	corefile := `example.org:0 {
-	chaos CoreDNS-001 miek@miek.nl
-	prometheus localhost:0
-}
-
-example.com:0 {
-	forward . 8.8.4.4:53
-	prometheus localhost:0
-}
-`
-	srv, err := CoreDNSServer(corefile)
-	if err != nil {
-		t.Fatalf("Could not get CoreDNS serving instance: %s", err)
-	}
-	defer srv.Stop()
-
-	metricName := "coredns_plugin_enabled" //{server, zone, name}
-
-	data := test.Scrape("http://" + metrics.ListenAddr + "/metrics")
-
-	// Get the value for the metrics where the one of the labels values matches "chaos".
-	got, _ := test.MetricValueLabel(metricName, "chaos", data)
-
-	if got != "1" {
-		t.Errorf("Expected value %s for %s, but got %s", "1", metricName, got)
-	}
-
-	// Get the value for the metrics where the one of the labels values matches "whoami".
-	got, _ = test.MetricValueLabel(metricName, "whoami", data)
-
-	if got != "" {
-		t.Errorf("Expected value %s for %s, but got %s", "", metricName, got)
-	}
-}
-
 func TestMetricsAvailable(t *testing.T) {
 	procMetric := "coredns_build_info"
 	procCache := "coredns_cache_size"
 	procCacheMiss := "coredns_cache_misses_total"
-	procForward := "coredns_dns_request_duration_seconds"
+	procForwardBucket := "coredns_dns_request_duration_seconds_bucket"
+	procForwardSum := "coredns_dns_request_duration_seconds_sum"
+	procForwardCount := "coredns_dns_request_duration_seconds_count"
 	corefileWithMetrics := `
 	.:0 {
 		prometheus localhost:0
@@ -254,9 +223,81 @@ func TestMetricsAvailable(t *testing.T) {
 	if _, _, err := cl.Exchange(m, tcp); err != nil {
 		t.Fatalf("Could not send message: %s", err)
 	}
-
 	// we should have metrics from forward, cache, and metrics itself
-	if err := collectMetricsInfo(metrics.ListenAddr, procMetric, procCache, procCacheMiss, procForward); err != nil {
+	actual, err := test.GetDnsMetrics(map[string]interface{}{
+		procMetric:        nil,
+		procCache:         nil,
+		procCacheMiss:     nil,
+		procForwardBucket: nil,
+		procForwardSum:    nil,
+		procForwardCount:  nil,
+	}, metrics.ListenAddr)
+	// we should have metrics from forward, cache, and metrics itself
+	if err != nil || len(actual) != 6 {
 		t.Errorf("Could not scrap one of expected stats : %s", err)
+	}
+}
+
+
+func TestMetricsAuto(t *testing.T) {
+	tmpdir, err := ioutil.TempDir(os.TempDir(), "coredns")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	c := `org:0 {
+		auto {
+			directory ` + tmpdir + ` db\.(.*) {1}
+			reload 1s
+		}
+                prometheus localhost:9154
+	}
+`
+
+	i, err := CoreDNSServer(c)
+	defer i.Stop()
+	if err != nil {
+		t.Fatalf("Could not get CoreDNS serving instance: %s", err)
+	}
+
+	udp, _ := CoreDNSServerPorts(i, 0)
+	if udp == "" {
+		t.Fatalf("Could not get UDP listening port")
+	}
+	t.Logf("current addr： %s\n", metrics.ListenAddr)
+	// Write db.example.org to get example.org.
+	if err = ioutil.WriteFile(filepath.Join(tmpdir, "db.example.org"), []byte(zoneContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+	// TODO(miek): make the auto sleep even less.
+	time.Sleep(1100 * time.Millisecond) // wait for it to be picked up
+
+	m := new(dns.Msg)
+	m.SetQuestion("www.example.org.", dns.TypeA)
+
+	if _, err := dns.Exchange(m, udp); err != nil {
+		t.Fatalf("Could not send message: %s", err)
+	}
+	metricName := "coredns_dns_request_count_total" //{zone, proto, family}
+	data := test.Scrape("http://" + metrics.ListenAddr + "/metrics")
+	// Get the value for the metrics where the one of the labels values matches "example.org."
+	got, _ := test.MetricValueLabel(metricName, "example.org.", data)
+	t.Logf("current addr： %s\n", metrics.ListenAddr)
+	if got != "1" {
+		t.Errorf("Expected value %s for %s, but got %s", "1", metricName, got)
+	}
+
+	// Remove db.example.org again. And see if the metric stops increasing.
+	os.Remove(filepath.Join(tmpdir, "db.example.org"))
+	time.Sleep(1100 * time.Millisecond) // wait for it to be picked up
+	if _, err := dns.Exchange(m, udp); err != nil {
+		t.Fatalf("Could not send message: %s", err)
+	}
+
+	data = test.Scrape("http://" + metrics.ListenAddr + "/metrics")
+	got, _ = test.MetricValueLabel(metricName, "example.org.", data)
+
+	if got != "1" {
+		t.Errorf("Expected value %s for %s, but got %s", "1", metricName, got)
 	}
 }
