@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/coredns/coredns/plugin/metrics"
+	"github.com/coredns/coredns/plugin/metrics/vars"
 	"github.com/coredns/coredns/plugin/test"
 
 	"github.com/google/go-cmp/cmp"
@@ -67,10 +68,10 @@ example.com:0 {
 	expect := test.DnsMetrics(
 		map[string]model.Samples{
 			metricName: model.Samples{
-				test.NewCacheSample(model.LabelValue(metricName), cachePluginSamples("chaos", "example.org.")),
-				test.NewCacheSample(model.LabelValue(metricName), cachePluginSamples("forward", "example.com.")),
-				test.NewCacheSample(model.LabelValue(metricName), cachePluginSamples("prometheus", "example.com.")),
-				test.NewCacheSample(model.LabelValue(metricName), cachePluginSamples("prometheus", "example.org.")),
+				test.NewSample(model.LabelValue(metricName), cachePluginSamples("chaos", "example.org.")),
+				test.NewSample(model.LabelValue(metricName), cachePluginSamples("forward", "example.com.")),
+				test.NewSample(model.LabelValue(metricName), cachePluginSamples("prometheus", "example.com.")),
+				test.NewSample(model.LabelValue(metricName), cachePluginSamples("prometheus", "example.org.")),
 			},
 		},
 	)
@@ -84,7 +85,6 @@ example.com:0 {
 	}
 }
 func TestMetricsRefused(t *testing.T) {
-
 	metricName := "coredns_dns_response_rcode_count_total"
 
 	corefile := `example.org:0 {
@@ -92,19 +92,11 @@ func TestMetricsRefused(t *testing.T) {
 	prometheus localhost:0
 }
 `
-	srv, err := CoreDNSServer(corefile)
-	defer srv.Stop()
+	srv, udp, _, err := CoreDNSServerAndPorts(corefile)
 	if err != nil {
 		t.Fatalf("Could not get CoreDNS serving instance: %s", err)
 	}
-
-	udp, _ := CoreDNSServerPorts(srv, 0)
-	if udp == "" {
-		t.Fatalf("Could not get UDP listening port")
-	}
-        if err != nil {
-		t.Fatalf("Could not get CoreDNS serving instance: %s", err)
-	}
+	defer srv.Stop()
 
 	m := new(dns.Msg)
 	m.SetQuestion("google.com.", dns.TypeA)
@@ -113,31 +105,20 @@ func TestMetricsRefused(t *testing.T) {
 		t.Fatalf("Could not send message: %s", err)
 	}
 
-	// coredns cache size
-	cachSizeSamples := map[model.LabelName]model.LabelValue{
-		model.MetricNameLabel: model.LabelValue(metricName),
-		"server":              "dns://:0",
-		"rcode":               "REFUSED",
-		"zone":                "dropped",
-		"Value":               "1",
+	data := test.Scrape("http://" + metrics.ListenAddr + "/metrics")
+	got, labels := test.MetricValue(metricName, data)
+
+	if got != "1" {
+		t.Errorf("Expected value %s for refused, but got %s", "1", got)
 	}
-	expect := test.DnsMetrics(
-		map[string]model.Samples{
-			metricName: model.Samples{test.NewCacheSample(model.LabelValue(metricName), cachSizeSamples)},
-		},
-	)
-	actual, err := test.GetDnsMetrics(map[string]interface{}{
-		metricName: nil,
-	}, metrics.ListenAddr)
-	if err != nil {
-		t.Errorf("Could not get dns metrics: %v", err)
+	if labels["zone"] != vars.Dropped {
+		t.Errorf("Expected zone value %s for refused, but got %s", vars.Dropped, labels["zone"])
 	}
-	t.Logf("current addr： %s\n", metrics.ListenAddr)
-	// compare to expected
-	if diff := cmp.Diff(expect, actual); diff != "" {
-		t.Errorf("Unexpected result diff (-want, +got): %s", diff)
+	if labels["rcode"] != "REFUSED" {
+		t.Errorf("Expected zone value %s for refused, but got %s", "REFUSED", labels["rcode"])
 	}
 }
+
 // Show that when 2 blocs share the same metric listener (they have a prometheus plugin on the same listening address),
 // ALL the metrics of the second bloc in order are declared in prometheus, especially the plugins that are used ONLY in the second bloc
 func TestMetricsSeveralBlocs(t *testing.T) {
@@ -237,7 +218,6 @@ func TestMetricsAvailable(t *testing.T) {
 		t.Errorf("Could not scrap one of expected stats : %s", err)
 	}
 }
-
 
 func TestMetricsAuto(t *testing.T) {
 	tmpdir, err := ioutil.TempDir(os.TempDir(), "coredns")

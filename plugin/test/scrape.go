@@ -65,19 +65,13 @@ type (
 		Count   string            `json:"count"`
 		Sum     string            `json:"sum"`
 	}
-	// DnsMetrics is metrics for dns
+	// DnsMetrics contain the metrics we scrape from CoreDNS.
 	DnsMetrics map[string]model.Samples
 )
 
-// NewDnsMetrics returns new metrics which are initialized.
-func NewDnsMetrics() DnsMetrics {
-	result := make(DnsMetrics)
-	return result
-}
-
-// GrabDnsMetrics retrieve metrics from the dns using a simple GET over htt
+// scrape retrieve metrics from the dns using a simple GET over htt
 // Currently only used in integration tests.
-func GrabDnsMetrics(url string) (DnsMetrics, error) {
+func scrape(url string) (DnsMetrics, error) {
 	resp, err := http.Get(url)
 	if err != nil {
 		return DnsMetrics{}, err
@@ -87,12 +81,8 @@ func GrabDnsMetrics(url string) (DnsMetrics, error) {
 	if err != nil {
 		return DnsMetrics{}, err
 	}
-	return parseDnsMetrics(string(body))
-}
-
-func parseDnsMetrics(data string) (DnsMetrics, error) {
-	result := NewDnsMetrics()
-	if err := parseMetrics(data, &result); err != nil {
+	result := make(DnsMetrics)
+	if err := parseMetrics(string(body), &result); err != nil {
 		return DnsMetrics{}, err
 	}
 	return result, nil
@@ -122,15 +112,15 @@ func parseMetrics(data string, output *DnsMetrics) error {
 	}
 }
 
-// GetDnsMetrics returns config related metrics from the dns, filtered to t
+// GetDnsMetrics returns config related metrics from the dns which match filterMetricNames.
 func GetDnsMetrics(filterMetricNames map[string]interface{}, url string) (DnsMetrics, error) {
-	// grab Kubelet metrics
-	ms, err := GrabDnsMetrics(fmt.Sprintf("http://%s/metrics", url))
+	// grab prometheus endpoint metrics
+	ms, err := scrape(fmt.Sprintf("http://%s/metrics", url))
 	if err != nil {
 		return nil, err
 	}
 
-	filtered := NewDnsMetrics()
+	filtered := make(DnsMetrics)
 	for name := range ms {
 		if _, ok := filterMetricNames[name]; !ok {
 			continue
@@ -146,8 +136,8 @@ func GetDnsMetrics(filterMetricNames map[string]interface{}, url string) (DnsMet
 	return filtered, nil
 }
 
-// NewCacheSample return the pointer of model.Sample
-func NewCacheSample(name model.LabelValue, source model.LabelSet) *model.Sample {
+// NewSample return the pointer of model.Sample
+func NewSample(name model.LabelValue, source model.LabelSet) *model.Sample {
 	sample := &model.Sample{
 		Metric: model.Metric(map[model.LabelName]model.LabelValue{
 			model.MetricNameLabel: name,
