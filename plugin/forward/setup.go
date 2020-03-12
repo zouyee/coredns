@@ -95,7 +95,7 @@ func parseStanza(c *caddy.Controller) (*Forward, error) {
 
 	toHosts, err := parse.HostPortOrFile(to...)
 	if err != nil {
-		return f, err
+		log.Warningf("parse with err: %v", err)
 	}
 
 	transports := make([]string, len(toHosts))

@@ -91,6 +91,9 @@ func (f *Forward) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns.Msg
 	span = ot.SpanFromContext(ctx)
 	i := 0
 	list := f.List()
+	if len(list) == 0 {
+		return dns.RcodeServerFailure, ErrNoForward
+	}
 	deadline := time.Now().Add(defaultTimeout)
 	start := time.Now()
 	for time.Now().Before(deadline) {

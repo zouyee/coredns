@@ -73,7 +73,7 @@ func parseStanza(c *caddy.Controller) (*GRPC, error) {
 
 	toHosts, err := parse.HostPortOrFile(to...)
 	if err != nil {
-		return g, err
+		log.Warningf("parse with err: %v", err)
 	}
 
 	for c.NextBlock() {

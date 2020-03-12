@@ -3,6 +3,7 @@ package grpc
 import (
 	"io/ioutil"
 	"os"
+	"path"
 	"reflect"
 	"strings"
 	"testing"
@@ -26,8 +27,8 @@ func TestSetup(t *testing.T) {
 		{"grpc . 127.0.0.1:8080", false, ".", nil, ""},
 		{"grpc . [::1]:53", false, ".", nil, ""},
 		{"grpc . [2003::1]:53", false, ".", nil, ""},
+		{"grpc . a27.0.0.1", false, ".", nil, ""},
 		// negative
-		{"grpc . a27.0.0.1", true, "", nil, "not an IP"},
 		{"grpc . 127.0.0.1 {\nblaatl\n}\n", true, "", nil, "unknown property"},
 		{`grpc . ::1
 		grpc com ::2`, true, "", nil, "plugin"},
@@ -104,13 +105,27 @@ tls
 }
 
 func TestSetupResolvconf(t *testing.T) {
-	const resolv = "resolv.conf"
-	if err := ioutil.WriteFile(resolv,
+	tmpDir, err := ioutil.TempDir("", "Resolvconf")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	const (
+		nomalresolv = "resolv_1.conf"
+		emptyResolv = "resolv_2.conf"
+	)
+
+	if err := ioutil.WriteFile(path.Join(tmpDir, nomalresolv),
 		[]byte(`nameserver 10.10.255.252
 nameserver 10.10.255.253`), 0666); err != nil {
 		t.Fatalf("Failed to write resolv.conf file: %s", err)
 	}
-	defer os.Remove(resolv)
+
+	f, err := ioutil.TempFile(tmpDir, emptyResolv)
+	if err != nil {
+		t.Errorf("Failed to create temporary file %s: %q", path.Join(tmpDir, f.Name()), err.Error())
+	}
 
 	tests := []struct {
 		input         string
@@ -119,7 +134,8 @@ nameserver 10.10.255.253`), 0666); err != nil {
 		expectedNames []string
 	}{
 		// pass
-		{`grpc . ` + resolv, false, "", []string{"10.10.255.252:53", "10.10.255.253:53"}},
+		{`grpc . ` + path.Join(tmpDir, nomalresolv), false, "", []string{"10.10.255.252:53", "10.10.255.253:53"}},
+		{`grpc . ` + path.Join(tmpDir, f.Name()), false, "", []string{}},
 	}
 
 	for i, test := range tests {
@@ -141,7 +157,7 @@ nameserver 10.10.255.253`), 0666); err != nil {
 			}
 		}
 
-		if !test.shouldErr {
+		if !test.shouldErr && len(test.expectedNames) != 0 {
 			for j, n := range test.expectedNames {
 				addr := f.proxies[j].addr
 				if n != addr {

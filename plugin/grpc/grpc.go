@@ -3,16 +3,20 @@ package grpc
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"time"
 
 	"github.com/coredns/coredns/plugin"
 	"github.com/coredns/coredns/plugin/debug"
+	clog "github.com/coredns/coredns/plugin/pkg/log"
 	"github.com/coredns/coredns/plugin/pkg/policy"
 	"github.com/coredns/coredns/request"
 
 	"github.com/miekg/dns"
 	ot "github.com/opentracing/opentracing-go"
 )
+
+var log = clog.NewWithPlugin("grpc")
 
 // GRPC represents a plugin instance that can proxy requests to another (DNS) server via gRPC protocol.
 // It has a list of proxies each representing one upstream proxy.
@@ -44,6 +48,9 @@ func (g *GRPC) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns.Msg) (
 	)
 	span = ot.SpanFromContext(ctx)
 	list := g.list()
+	if len(list) == 0 {
+		return dns.RcodeServerFailure, errors.New("no forwarder defined")
+	}
 	deadline := time.Now().Add(defaultTimeout)
 
 	for time.Now().Before(deadline) {
