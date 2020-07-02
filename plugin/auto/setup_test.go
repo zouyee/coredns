@@ -37,6 +37,14 @@ func TestAutoParse(t *testing.T) {
 			}`,
 			false, "/tmp", "${1}", `db\.(.*)`, 0 * time.Second, nil,
 		},
+		// Directory does not exist
+		{
+			`auto {
+				directory tmp
+				reload 0
+			}`,
+			false, "tmp", "${1}", `db\.(.*)`, 0 * time.Second, nil,
+		},
 		{
 			`auto {
 				directory /tmp (.*) bliep
@@ -58,6 +66,13 @@ func TestAutoParse(t *testing.T) {
 			}`,
 			false, "/tmp", "bliep", `(.*)`, 60 * time.Second, []string{"127.0.0.1:53", "127.0.0.2:53"},
 		},
+		// upstream has been deprecated.
+		{
+			`auto {
+				upstream
+			}`,
+			false, "", "${1}", `db\.(.*)`, 60 * time.Second, []string{"127.0.0.1:53", "127.0.0.2:53"},
+		},
 		// errors
 		// NO_RELOAD has been deprecated.
 		{
@@ -66,6 +81,20 @@ func TestAutoParse(t *testing.T) {
 				no_reload
 			}`,
 			true, "/tmp", "${1}", `db\.(.*)`, 0 * time.Second, nil,
+		},
+		// invalid destination
+		{
+			`auto {
+				transfer to test
+			}`,
+			true, "", "${1}", `db\.(.*)`, 60 * time.Second, []string{"127.0.0.2:53"},
+		},
+		// invalid reload duration
+		{
+			`auto {
+				reload test
+			}`,
+			true, "", "${1}", `db\.(.*)`, 60 * time.Second, []string{"127.0.0.2:53"},
 		},
 		// TIMEOUT has been deprecated.
 		{
@@ -95,6 +124,12 @@ func TestAutoParse(t *testing.T) {
 			}`,
 			true, "/tmp", "${1}", ``, 60 * time.Second, nil,
 		},
+		{
+			`auto example.org {
+				directory /tmp {}
+			}`,
+			true, "/tmp", "${1}", ``, 60 * time.Second, nil,
+		},
 		// unexpected argument.
 		{
 			`auto example.org {
@@ -102,6 +137,15 @@ func TestAutoParse(t *testing.T) {
 			}`,
 			true, "/tmp", "${1}", ``, 60 * time.Second, nil,
 		},
+	}
+	for i, test := range tests {
+		c := caddy.NewTestController("dns", test.inputFileRules)
+		err := setup(c)
+		if err == nil && test.shouldErr {
+			t.Fatalf("Test %d expected errors, but got no error", i)
+		} else if err != nil && !test.shouldErr {
+			t.Fatalf("Test %d expected no errors, but got '%v'", i, err)
+		}
 	}
 
 	for i, test := range tests {
