@@ -89,6 +89,12 @@ var hostsTestCases = []test.Case{
 		},
 	},
 	{
+		Qname: "4.0.0.10.in-addr.arpa.", Qtype: dns.TypePTR,
+		Answer: []dns.RR{
+			test.PTR("2.0.0.10.in-addr.arpa. 3600 PTR example.com."),
+		},
+	},
+	{
 		Qname: "1.0.0.127.in-addr.arpa.", Qtype: dns.TypePTR,
 		Answer: []dns.RR{
 			test.PTR("1.0.0.127.in-addr.arpa. 3600 PTR localhost."),
@@ -104,6 +110,14 @@ var hostsTestCases = []test.Case{
 		Answer: []dns.RR{},
 	},
 	{
+		Qname: "test", Qtype: dns.TypeMX,
+		Answer: []dns.RR{},
+	},
+	{
+		Qname: "miek.nl.", Qtype: dns.TypeMX,
+		Answer: []dns.RR{},
+	},
+	{
 		Qname: "fallthrough-example.org.", Qtype: dns.TypeAAAA,
 		Answer: []dns.RR{}, Rcode: dns.RcodeSuccess,
 	},
@@ -115,6 +129,7 @@ const hostsExample = `
 10.0.0.1 example.org
 ::FFFF:10.0.0.2 example.com
 10.0.0.3 fallthrough-example.org
+2a01:7e00::f03c:91ff:fef1 miek.nl.
 reload 5s
 timeout 3600
 `

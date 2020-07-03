@@ -66,6 +66,36 @@ func TestHostsParse(t *testing.T) {
 			}`,
 			true, "/etc/hosts", nil, fall.Root,
 		},
+		{
+			`hosts /etc/hosts miek.nl 10.0.0.9/8 {
+				no_reverse
+			}`,
+			false, "/etc/hosts", []string{"miek.nl.", "10.in-addr.arpa."}, fall.Root,
+		},
+		{
+			`hosts /etc/hosts miek.nl 10.0.0.9/8 {
+				ttl
+			}`,
+			true, "/etc/hosts", []string{"miek.nl.", "10.in-addr.arpa."}, fall.Zero,
+		},
+		{
+			`hosts /etc/hosts miek.nl 10.0.0.9/8 {
+				ttl 65536
+			}`,
+			true, "/etc/hosts", []string{"miek.nl.", "10.in-addr.arpa."}, fall.Zero,
+		},
+		{
+			`hosts /etc/hosts miek.nl 10.0.0.9/8 {
+				reload
+			}`,
+			true, "/etc/hosts", []string{"miek.nl.", "10.in-addr.arpa."}, fall.Zero,
+		},
+		{
+			`hosts /etc/hosts miek.nl 10.0.0.9/8 {
+				reload 2s
+			}`,
+			false, "/etc/hosts", []string{"miek.nl.", "10.in-addr.arpa."}, fall.Root,
+		},
 	}
 
 	for i, test := range tests {
@@ -138,6 +168,15 @@ func TestHostsInlineParse(t *testing.T) {
 			fall.Root,
 		},
 	}
+	for i, test := range tests {
+		c := caddy.NewTestController("dns", test.inputFileRules)
+		err := setup(c)
+		if err == nil && test.shouldErr {
+			t.Fatalf("Test %d expected errors, but got no error", i)
+		} else if err != nil && !test.shouldErr {
+			t.Fatalf("Test %d expected no errors, but got '%v'", i, err)
+		}
+	}
 
 	for i, test := range tests {
 		c := caddy.NewTestController("dns", test.inputFileRules)
@@ -167,5 +206,4 @@ func TestHostsInlineParse(t *testing.T) {
 			}
 		}
 	}
-
 }
