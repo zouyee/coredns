@@ -20,6 +20,7 @@ require (
 	github.com/hashicorp/golang-lru v0.5.4 // indirect
 	github.com/imdario/mergo v0.3.9 // indirect
 	github.com/infobloxopen/go-trees v0.0.0-20190313150506-2af4e13f9062
+	github.com/konsorten/go-windows-terminal-sequences v1.0.3 // indirect
 	github.com/kr/pretty v0.2.0 // indirect
 	github.com/matttproud/golang_protobuf_extensions v1.0.1
 	github.com/miekg/dns v1.1.29
@@ -43,3 +44,5 @@ require (
 	k8s.io/client-go v0.18.5
 	k8s.io/klog v1.0.0
 )
+
+replace github.com/Sirupsen/logrus => github.com/sirupsen/logrus v1.6.0
