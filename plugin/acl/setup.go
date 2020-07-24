@@ -4,11 +4,9 @@ import (
 	"net"
 	"strings"
 
+	"github.com/caddyserver/caddy"
 	"github.com/coredns/coredns/core/dnsserver"
 	"github.com/coredns/coredns/plugin"
-	"github.com/coredns/coredns/plugin/metrics"
-
-	"github.com/caddyserver/caddy"
 	"github.com/infobloxopen/go-trees/iptree"
 	"github.com/miekg/dns"
 )
@@ -37,11 +35,6 @@ func setup(c *caddy.Controller) error {
 		return a
 	})
 
-	// Register all metrics.
-	c.OnStartup(func() error {
-		metrics.MustRegister(c, RequestBlockCount, RequestAllowCount)
-		return nil
-	})
 	return nil
 }
 
